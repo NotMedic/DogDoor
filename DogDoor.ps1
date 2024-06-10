@@ -1,18 +1,10 @@
-Function Invoke-DogDoor {
+ Function Invoke-AddACLs {
     param(
         [Parameter(Mandatory = $true)][string]$User
     )
-
     $usertoadd = New-Object System.Security.Principal.NTAccount($User)
-    
-    try {
-        $SID = $usertoadd.Translate([System.Security.Principal.SecurityIdentifier])
-        Write-Host $usertoadd has a SID of $SID
-    }
-    catch {
-        Write-Error "Error translating $usertoadd to a SID"
-        throw "Error translating $usertoadd to a SID"
-    }
+    $SID = $usertoadd.Translate([System.Security.Principal.SecurityIdentifier])
+    Write-Host $usertoadd has a SID of $SID
 
     Add-NetSessionEnumACL -SID $SID
     Write-Host "--------------"
@@ -28,7 +20,7 @@ Function Add-NetSessionEnumACL {
 
     $key = "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\DefaultSecurity"
     $subkey = "SrvsvcSessionInfo"
-    $permission = 0x00000001
+    $right = 0x00000001
 
     #Get the current binary value from the registry
     #This one exists by default, so no real need to check if it doesn't exist
@@ -36,16 +28,19 @@ Function Add-NetSessionEnumACL {
     $value = Get-ItemPropertyValue -Path $key -Name $subkey
 
     #Convert the binary value to a RawSecurityDescriptor object
+    ###$currentacl = New-Object -TypeName System.Security.AccessControl.CommonSecurityDescriptor -ArgumentList $true, $false, $value, 0
     $currentacl = New-Object -TypeName System.Security.AccessControl.RawSecurityDescriptor -ArgumentList $value, 0
 
     #Create a new ACE for our user defined aboveA
-    $newace = New-Object System.Security.AccessControl.CommonAce -ArgumentList None, AccessAllowed, $permission, $SID, $false, $null
+    #$newace = New-Object System.Security.AccessControl.CommonAce([System.Security.AccessControl.AceFlags]::None, [System.Security.AccessControl.AceQualifier]::AccessAllowed, $right, $SID, $false, $null)
+    $newace = New-Object System.Security.AccessControl.CommonAce -ArgumentList None, AccessAllowed, $right, $SID, $false, $null
 
     #Check if the ACE already exists
     if ($currentacl.DiscretionaryAcl.GetEnumerator() -notcontains $newAce) {
         Write-Host "ACE for $SID Not Found in ACL"
 
         #If it doesn't exist, Add the new ACE to the ACL
+        ###$currentacl.DiscretionaryAcl.AddAccess([System.Security.AccessControl.AccessControlType]::Allow, $SID, $right, 0, 0)
         $currentacl.DiscretionaryAcl.InsertAce($currentacl.DiscretionaryAcl.Count, $newace)
         Write-Host  "Adding ACE for $SID to ACL"
 
@@ -77,13 +72,19 @@ Function Add-SAMRACL {
 
     $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
     $subkey = "RestrictRemoteSam"
-    $permission = 0x20000
+    $right = 0x20000
 
     #If the RestrictRemoteSam key exists, get the current value, if not, assign an empty value
     try {
         $value = Get-ItemPropertyValue -Path $key -Name $subkey
-        $currentacl = New-Object -TypeName System.Security.AccessControl.RawSecurityDescriptor -ArgumentList $value
-        Write-Host "Getting current ACL from $key $subkey"
+        if ("" -eq $value) {
+            Write-Host "RestrictRemoteSam value is null, creating default ACL"
+            $currentacl = New-Object -TypeName System.Security.AccessControl.RawSecurityDescriptor -ArgumentList "O:BAG:BAD:(A;;RC;;;BA)"
+        }
+        else {
+            $currentacl = New-Object -TypeName System.Security.AccessControl.RawSecurityDescriptor -ArgumentList $value
+            Write-Host "Getting current ACL from $key $subkey"
+        }
     }
     catch {
         $value = ""
@@ -92,7 +93,8 @@ Function Add-SAMRACL {
     }
 
     #Create a new ACE for our user defined above
-    $newace = New-Object System.Security.AccessControl.CommonAce -ArgumentList None, AccessAllowed, $permission, $SID, $false, $null
+    #$newace = New-Object System.Security.AccessControl.CommonAce([System.Security.AccessControl.AceFlags]::None, [System.Security.AccessControl.AceQualifier]::AccessAllowed, $right, $SID, $false, $null)
+    $newace = New-Object System.Security.AccessControl.CommonAce -ArgumentList None, AccessAllowed, $right, $SID, $false, $null
 
     if ($currentacl.DiscretionaryAcl.GetEnumerator() -notcontains $newAce) {
         Write-Host "ACE for $SID Not Found in ACL"
@@ -105,7 +107,7 @@ Function Add-SAMRACL {
 
         #Write the new SDDL value to the registry
         try {
-            Write-Host "Writing $sddl to $key $name"
+            Write-Host "Writing $currentacl to $key $name"
             Set-ItemProperty -Path $key -Name $subkey -Value $sddl
         }
         catch {
@@ -127,7 +129,7 @@ Function Get-CurrentACLs {
 
     Write-Host "---------------------"
 
-    try {
+   try {
         $samrvalue = Get-ItemPropertyValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictRemoteSam"
         $samracl = New-Object -TypeName System.Security.AccessControl.RawSecurityDescriptor -ArgumentList $samrvalue
        
@@ -140,4 +142,4 @@ Function Get-CurrentACLs {
 }
 
 #If this is ran via GPO, uncomment the below line and replace DOMAIN\USER with the user you want to add to the ACLs
-#Invoke-DogDoor -User DOMAIN\USER
+#Invoke-AddACLs -User DOMAIN\USER
