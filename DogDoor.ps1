@@ -189,5 +189,8 @@ Function Get-CurrentACLs {
     }
 }
 
+#To Remove an existing ACL, run the below command:
+#Invoke-AddACLs -User DOMAIN\USER -Remove
+
 #If this is ran via GPO, uncomment the below line and replace DOMAIN\USER with the user you want to add to the ACLs
 #Invoke-AddACLs -User DOMAIN\USER 
